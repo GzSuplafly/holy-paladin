@@ -1,158 +1,63 @@
-local addonName, _A = ...
-local _G = _A._G
-local Version = 1.0
+local function GetHP(unit)
+    return (UnitHealth(unit) / UnitHealthMax(unit)) * 100
+end
 
-local settings = {
-    holyShockHP = 50,          -- เปอร์เซ็นต์ HP ที่จะใช้ Holy Shock
-    cleanseDebuffHP = 30,      -- เปอร์เซ็นต์ HP ที่จะใช้ Cleanse
-    defensiveCooldownHP = 30, -- เปอร์เซ็นต์ HP ที่จะใช้ Defensive Cooldowns
-    interruptThreshold = 70,   -- เปอร์เซ็นต์ HP ของเป้าหมายที่ควรใช้ Interrupt
-    aoeHealingRadius = 10,     -- ระยะทางสำหรับ AOE Healing
-    aoeHealingHP = 70,         -- เปอร์เซ็นต์ HP ที่จะใช้ AOE Healing
-}
-
-local function castSpellIfPossible(spellName, unit)
-    if _A.CanCast(spellName, unit) then
-        _A.CastSpellByName(spellName, unit)
+local function UseSkillIfNeeded(skill, condition)
+    if condition then
+        _A:UseSkill(skill)
     end
 end
 
-local function updateRotation()
-    local playerHP = _A.UnitHealthPercent("player")
-    local targetHP = _A.UnitHealthPercent("target")
-
-    -- ใช้ Holy Shock
-    if targetHP <= settings.holyShockHP then
-        castSpellIfPossible("Holy Shock", "target")
-    end
-
-    -- ใช้ Cleanse ถ้ามี Debuff
-    if targetHP <= settings.cleanseDebuffHP and _A.HasDebuff("target") then
-        castSpellIfPossible("Cleanse", "target")
-    end
-
-    -- ใช้ Defensive Cooldowns
-    if playerHP <= settings.defensiveCooldownHP then
-        castSpellIfPossible("Ardent Defender", "player")
-        castSpellIfPossible("Shield of Vengeance", "player")
-    end
-
-    -- ใช้ Interrupt
-    if settings.interruptThreshold and _A.IsCasting("target") then
-        castSpellIfPossible("Rebuke", "target")
-    end
-
-    -- AOE Healing
-    local aoeMembers = _A.GetUnitsInRange("player", settings.aoeHealingRadius)
-    local lowHPMembers = 0
-    for _, unit in pairs(aoeMembers) do
-        if _A.UnitHealthPercent(unit) <= settings.aoeHealingHP then
-            lowHPMembers = lowHPMembers + 1
+local function HealParty()
+    for i = 1, 4 do
+        local partyUnit = "party" .. i
+        if UnitExists(partyUnit) and GetHP(partyUnit) < 100 then
+            -- ใช้สกิล Holy Shock หรือ Flash of Light ตามความเหมาะสม
+            if GetHP(partyUnit) < DM_Settings.FlashOfLightHP then
+                UseSkillIfNeeded("Flash of Light", true)
+            elseif GetHP(partyUnit) < DM_Settings.HolyShockHP then
+                UseSkillIfNeeded("Holy Shock", true)
+            end
         end
     end
+end
 
-    if lowHPMembers > 0 then
-        castSpellIfPossible("Light of Dawn", "player")
+local function Rotation()
+    local hp = GetHP("player")
+    
+    -- ใช้สกิล Holy Shock ถ้า HP น้อยกว่า 50%
+    UseSkillIfNeeded("Holy Shock", hp < DM_Settings.HolyShockHP)
+
+    -- ใช้สกิล Flash of Light ถ้า HP น้อยกว่า 30%
+    UseSkillIfNeeded("Flash of Light", hp < DM_Settings.FlashOfLightHP)
+
+    -- ใช้สกิล Light of Dawn ถ้ามีมากกว่าสี่เป้าหมายที่มี HP ต่ำกว่า 50%
+    if _A:GetCountLowHealthTargets(50) >= 4 then
+        _A:UseSkill("Light of Dawn")
     end
 
-    -- Healing Abilities
-    if targetHP <= 70 then
-        castSpellIfPossible("Word of Glory", "target")
+    -- ใช้สกิล Beacon of Light ถ้าไม่มีกำลังบัพนี้
+    if not _A:HasBuff("Beacon of Light") then
+        _A:UseSkill("Beacon of Light")
     end
 
-    if playerHP <= 50 then
-        castSpellIfPossible("Lay on Hands", "player")
+    -- ฮิลให้กับสมาชิกในปาร์ตี้เมื่ออยู่นอกการต่อสู้
+    if not UnitAffectingCombat("player") then
+        HealParty()
     end
 end
 
--- ตั้งค่า Timer เพื่อตรวจสอบและใช้ Rotation เป็นประจำ
-_G.C_Timer.NewTicker(1, function()
-    updateRotation()
+-- การทำงานหลัก
+local function OnUpdate()
+    Rotation()
+end
+
+-- ตั้งค่าการทำงานทุกๆ 0.5 วินาที
+local updateFrame = CreateFrame("Frame")
+updateFrame:SetScript("OnUpdate", function(self, elapsed)
+    self.time = (self.time or 0) + elapsed
+    if self.time >= 0.5 then
+        OnUpdate()
+        self.time = 0
+    end
 end)
-
--- ฟังก์ชันเริ่มต้นสำหรับการโหลดการตั้งค่า
-local function initializeSettings()
-    -- โหลดหรือกำหนดค่าเริ่มต้นที่นี่
-    _A.print("|cFF00FF00Holy Paladin Rotation Initialized|r")
-end
-
-initializeSettings()
-local addonName, _A = ...
-local _G = _A._G
-local Version = 1.0
-
-local settings = {
-    holyShockHP = 50,          -- เปอร์เซ็นต์ HP ที่จะใช้ Holy Shock
-    cleanseDebuffHP = 30,      -- เปอร์เซ็นต์ HP ที่จะใช้ Cleanse
-    defensiveCooldownHP = 30, -- เปอร์เซ็นต์ HP ที่จะใช้ Defensive Cooldowns
-    interruptThreshold = 70,   -- เปอร์เซ็นต์ HP ของเป้าหมายที่ควรใช้ Interrupt
-    aoeHealingRadius = 10,     -- ระยะทางสำหรับ AOE Healing
-    aoeHealingHP = 70,         -- เปอร์เซ็นต์ HP ที่จะใช้ AOE Healing
-}
-
-local function castSpellIfPossible(spellName, unit)
-    if _A.CanCast(spellName, unit) then
-        _A.CastSpellByName(spellName, unit)
-    end
-end
-
-local function updateRotation()
-    local playerHP = _A.UnitHealthPercent("player")
-    local targetHP = _A.UnitHealthPercent("target")
-
-    -- ใช้ Holy Shock
-    if targetHP <= settings.holyShockHP then
-        castSpellIfPossible("Holy Shock", "target")
-    end
-
-    -- ใช้ Cleanse ถ้ามี Debuff
-    if targetHP <= settings.cleanseDebuffHP and _A.HasDebuff("target") then
-        castSpellIfPossible("Cleanse", "target")
-    end
-
-    -- ใช้ Defensive Cooldowns
-    if playerHP <= settings.defensiveCooldownHP then
-        castSpellIfPossible("Ardent Defender", "player")
-        castSpellIfPossible("Shield of Vengeance", "player")
-    end
-
-    -- ใช้ Interrupt
-    if settings.interruptThreshold and _A.IsCasting("target") then
-        castSpellIfPossible("Rebuke", "target")
-    end
-
-    -- AOE Healing
-    local aoeMembers = _A.GetUnitsInRange("player", settings.aoeHealingRadius)
-    local lowHPMembers = 0
-    for _, unit in pairs(aoeMembers) do
-        if _A.UnitHealthPercent(unit) <= settings.aoeHealingHP then
-            lowHPMembers = lowHPMembers + 1
-        end
-    end
-
-    if lowHPMembers > 0 then
-        castSpellIfPossible("Light of Dawn", "player")
-    end
-
-    -- Healing Abilities
-    if targetHP <= 70 then
-        castSpellIfPossible("Word of Glory", "target")
-    end
-
-    if playerHP <= 50 then
-        castSpellIfPossible("Lay on Hands", "player")
-    end
-end
-
--- ตั้งค่า Timer เพื่อตรวจสอบและใช้ Rotation เป็นประจำ
-_G.C_Timer.NewTicker(1, function()
-    updateRotation()
-end)
-
--- ฟังก์ชันเริ่มต้นสำหรับการโหลดการตั้งค่า
-local function initializeSettings()
-    -- โหลดหรือกำหนดค่าเริ่มต้นที่นี่
-    _A.print("|cFF00FF00Holy Paladin Rotation Initialized|r")
-end
-
-initializeSettings()
