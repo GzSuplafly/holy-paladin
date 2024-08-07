@@ -1,63 +1,241 @@
-local function GetHP(unit)
-    return (UnitHealth(unit) / UnitHealthMax(unit)) * 100
-end
+local addonName, _A = ...
 
-local function UseSkillIfNeeded(skill, condition)
-    if condition then
-        _A:UseSkill(skill)
+local GUI = {
+    {
+        key = 'autoDisease',
+        name = 'AUTO DISPEL DISEASE/TOXIN IN PARTY',
+        text = 'Dispel specific diseases/toxins in Dragonflight dungeons',
+        icon = 'Interface\\Icons\\Spell_holy_renew.png'
+    },
+    {
+        key = 'autoHeal',
+        name = 'AUTO HEAL LOW HP IN PARTY',
+        text = 'Automatically heal party members with low HP',
+        icon = 'Interface\\Icons\\Spell_holy_holyshock.png'
+    },
+    {
+        key = 'autoCooldowns',
+        name = 'AUTO USE COOLDOWNS',
+        text = 'Automatically use cooldowns like Divine Shield and Avenging Wrath',
+        icon = 'Interface\\Icons\\Spell_holy_divineprotection.png'
+    },
+    {
+        key = 'healFlashOfLight',
+        name = 'AUTO USE FLASH OF LIGHT',
+        text = 'Automatically use Flash of Light to heal yourself or party members',
+        icon = 'Interface\\Icons\\Spell_holy_flashheal.png'
+    },
+    {
+        key = 'healHolyLight',
+        name = 'AUTO USE HOLY LIGHT',
+        text = 'Automatically use Holy Light to heal yourself or party members',
+        icon = 'Interface\\Icons\\Spell_holy_holyfire.png'
+    },
+    {
+        key = 'healHolyShock',
+        name = 'AUTO USE HOLY SHOCK',
+        text = 'Automatically use Holy Shock to heal yourself or party members',
+        icon = 'Interface\\Icons\\Spell_holy_holyshock.png'
+    },
+    {
+        key = 'healWordOfGlory',
+        name = 'AUTO USE WORD OF GLORY',
+        text = 'Automatically use Word of Glory to heal yourself or party members',
+        icon = 'Interface\\Icons\\Spell_holy_wordofglory.png'
+    }
+}
+
+local exeOnLoad = function()
+    _A.Interface:ShowToggle("cooldowns", false)
+    _A.Interface:ShowToggle("interrupts", false)
+    _A.Interface:ShowToggle("aoe", false)
+
+    -- Add GUI settings
+    for _, setting in ipairs(GUI) do
+        _A.Interface:AddToggle(setting)
     end
 end
 
-local function HealParty()
-    for i = 1, 4 do
-        local partyUnit = "party" .. i
-        if UnitExists(partyUnit) and GetHP(partyUnit) < 100 then
-            -- ใช้สกิล Holy Shock หรือ Flash of Light ตามความเหมาะสม
-            if GetHP(partyUnit) < DM_Settings.FlashOfLightHP then
-                UseSkillIfNeeded("Flash of Light", true)
-            elseif GetHP(partyUnit) < DM_Settings.HolyShockHP then
-                UseSkillIfNeeded("Holy Shock", true)
+local exeOnUnload = function()
+    -- Cleanup or unload settings if needed
+end
+
+local inCombat = function()
+    local player = Object("player")
+    if not player then return end
+    local target = Object("target")
+    local lowest = Object("lowest")
+
+    -- Pause if CC locked
+    if player:State("stun || fear || sleep || disorient || incapacitate") then
+        return 
+    end
+
+    -- Pause if keybind is pressed
+    if player:keybind("lalt") then
+        return
+    end
+
+    -- Cancel protection if mounted
+    if IsMounted() then
+        return
+    end
+
+    -- Lay on Hands
+    if player:CanCast("Lay on Hands") and player:health() < 20 and not player:debuff("Forbearance") then
+        return player:Cast("Lay on Hands")
+    end
+
+    if player:CanCast("Lay on Hands") and lowest and lowest:health() < 40 and lowest:distance() < 35 and lowest:los() and player:health() > 70 and not lowest:debuff("Forbearance") then
+        return lowest:Cast("Lay on Hands")
+    end
+
+    -- Auto Dispel in Dungeon
+    if IsInGroup() and IsInInstance() then
+        if player:toggle('autoDisease') and player:CanCast("Cleanse Toxins") and player:mana() > 11 then
+            if player:debuffCountAny("Creeping Mold") > 2 then
+                return player:Cast("Cleanse Toxins")
             end
+
+            if lowest and lowest:los() and IsSpellInRange("Flash of Light", lowest.key) == 1 then
+                if lowest:debuffCountAny("Decaying Spores") > 2 then
+                    return lowest:Cast("Cleanse Toxins")
+                end
+            end
+        end
+    end
+
+    -- Use Cooldowns
+    if player:toggle('autoCooldowns') then
+        if player:CanCast("Avenging Wrath") and player:health() > 50 then
+            return player:Cast("Avenging Wrath")
+        end
+
+        if player:CanCast("Divine Shield") and player:health() < 30 then
+            return player:Cast("Divine Shield")
+        end
+    end
+
+    -- Healing
+    if player:toggle('healFlashOfLight') and player:CanCast("Flash of Light") then
+        if player:health() < 80 then
+            return player:Cast("Flash of Light")
+        end
+
+        if lowest and lowest:health() < 80 and lowest:distance() < 35 and lowest:los() then
+            return lowest:Cast("Flash of Light")
+        end
+    end
+
+    if player:toggle('healHolyLight') and player:CanCast("Holy Light") then
+        if player:health() < 80 then
+            return player:Cast("Holy Light")
+        end
+
+        if lowest and lowest:health() < 80 and lowest:distance() < 35 and lowest:los() then
+            return lowest:Cast("Holy Light")
+        end
+    end
+
+    if player:toggle('healHolyShock') and player:CanCast("Holy Shock") then
+        if player:health() < 60 then
+            return player:Cast("Holy Shock")
+        end
+
+        if lowest and lowest:health() < 60 and lowest:distance() < 35 and lowest:los() then
+            return lowest:Cast("Holy Shock")
+        end
+    end
+
+    if player:toggle('healWordOfGlory') and player:CanCast("Word of Glory") then
+        local hpToHeal = player:health() < 50 and 50 or 80  -- Adjust the HP threshold as needed
+        if player:holyPower() >= 3 and player:health() < hpToHeal then
+            return player:Cast("Word of Glory")
+        end
+
+        if lowest and lowest:holyPower() >= 3 and lowest:health() < hpToHeal and lowest:distance() < 35 and lowest:los() then
+            return lowest:Cast("Word of Glory")
+        end
+    end
+
+    -- Interrupt
+    if target and player:CanCast("Rebuke") and target:enemy() and IsSpellInRange("Rebuke", target) == 1 and target:combat() and target:alive() and target:infront() and target:interruptAt(40) then
+        return target:Cast("Rebuke")
+    end
+
+    -- DPS on target
+    if target and target:enemy() and target:alive() and target:infront() then
+        if IsSpellInRange("Rebuke", target) == 1 and not player:AutoAttack() then
+            _A.AttackTarget()
+        end
+
+        if player:CanCast("Shield of the Righteous") and IsSpellInRange("Rebuke", target) == 1 and player:buff("Divine Purpose") then
+            return target:Cast("Shield of the Righteous")
+        end
+
+        if player:CanCast("Judgment") and IsSpellInRange("Avenger's Shield", target) == 1 then
+            return target:Cast("Judgment")
+        end
+
+        if player:CanCast("Hammer of the Righteous") and IsSpellInRange("Rebuke", target) == 1 then
+            return target:Cast("Hammer of the Righteous")
         end
     end
 end
 
-local function Rotation()
-    local hp = GetHP("player")
-    
-    -- ใช้สกิล Holy Shock ถ้า HP น้อยกว่า 50%
-    UseSkillIfNeeded("Holy Shock", hp < DM_Settings.HolyShockHP)
+local outCombat = function()
+    local player = Object("player")
+    if not player then return end
+    local lowest = Object("lowest")
 
-    -- ใช้สกิล Flash of Light ถ้า HP น้อยกว่า 30%
-    UseSkillIfNeeded("Flash of Light", hp < DM_Settings.FlashOfLightHP)
-
-    -- ใช้สกิล Light of Dawn ถ้ามีมากกว่าสี่เป้าหมายที่มี HP ต่ำกว่า 50%
-    if _A:GetCountLowHealthTargets(50) >= 4 then
-        _A:UseSkill("Light of Dawn")
+    if not IsInInstance() then
+        if player:CanCast("Cleanse Toxins") and player:debuff(391404) then
+            return player:Cast("Cleanse Toxins")
+        end
     end
 
-    -- ใช้สกิล Beacon of Light ถ้าไม่มีกำลังบัพนี้
-    if not _A:HasBuff("Beacon of Light") then
-        _A:UseSkill("Beacon of Light")
+    if player:keybind("lalt") then
+        return
     end
 
-    -- ฮิลให้กับสมาชิกในปาร์ตี้เมื่ออยู่นอกการต่อสู้
-    if not UnitAffectingCombat("player") then
-        HealParty()
+    if IsMounted() or IsBagOpen(0) or IsBagOpen(-1) then
+        return
+    end
+
+    if _A.ArkInventory then
+        if _A.ArkInventory.Frame_Main_Get(_A.ArkInventory.Const.Location.Bag):IsVisible() then
+            return
+        end
+    end
+
+    if _A.Bagnon then
+        if _A.Bagnon.Frames:IsShown('inventory') then
+            return
+        end
+    end
+
+    -- Flash of Light Heal out of combat
+    if player:toggle('healFlashOfLight') and player:CanCast("Flash of Light") and player:mana() > 11 and not player:moving() then
+        if player:health() < 80 then
+            return player:Cast("Flash of Light")
+        end
+
+        if lowest and lowest:health() < 80 and lowest:distance() < 35 and lowest:los() then
+            return lowest:Cast("Flash of Light")
+        end
     end
 end
 
--- การทำงานหลัก
-local function OnUpdate()
-    Rotation()
-end
-
--- ตั้งค่าการทำงานทุกๆ 0.5 วินาที
-local updateFrame = CreateFrame("Frame")
-updateFrame:SetScript("OnUpdate", function(self, elapsed)
-    self.time = (self.time or 0) + elapsed
-    if self.time >= 0.5 then
-        OnUpdate()
-        self.time = 0
+local eventHandler = CreateFrame("Frame")
+eventHandler:RegisterEvent("PLAYER_LOGIN")
+eventHandler:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventHandler:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventHandler:SetScript("OnEvent", function(self, event, ...)
+    if event == "PLAYER_LOGIN" then
+        exeOnLoad()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        outCombat()
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        inCombat()
     end
 end)
